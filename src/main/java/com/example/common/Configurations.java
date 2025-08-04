@@ -3,6 +3,7 @@ package com.example.common;
 import com.azure.cosmos.implementation.apachecommons.lang.StringUtils;
 import com.azure.cosmos.implementation.guava25.base.Strings;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -39,4 +40,54 @@ public class Configurations {
                     .split(","));
     public static final int QPS = Integer.parseInt(System.getProperty("QPS",
             StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("QPS")), "-1")));
+    
+    // Workload duration in ISO8601 format (e.g., "PT1H" for 1 hour, "PT30M" for 30 minutes)
+    public static final String WORKLOAD_DURATION = System.getProperty("WORKLOAD_DURATION",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("WORKLOAD_DURATION")), null));
+    
+    public static final Duration WORKLOAD_DURATION_PARSED = WORKLOAD_DURATION != null ? 
+            Duration.parse(WORKLOAD_DURATION) : null;
+    
+    // Operation type controls - if any of these are true, only that operation type will be executed
+    public static final boolean ONLY_READS = Boolean.parseBoolean(
+            System.getProperty("ONLY_READS",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("ONLY_READS")), "false")));
+    
+    public static final boolean ONLY_QUERIES = Boolean.parseBoolean(
+            System.getProperty("ONLY_QUERIES",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("ONLY_QUERIES")), "false")));
+    
+    public static final boolean ONLY_UPSERTS = Boolean.parseBoolean(
+            System.getProperty("ONLY_UPSERTS",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("ONLY_UPSERTS")), "false")));
+    
+    // ReadAll workload configuration
+    public static final boolean ONLY_READALL = Boolean.parseBoolean(
+            System.getProperty("ONLY_READALL",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("ONLY_READALL")), "false")));
+    
+    // Predefined PK values for readAll workload (comma-separated integers)
+    public static final String READALL_PK_VALUES = System.getProperty("READALL_PK_VALUES",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("READALL_PK_VALUES")), generateDefaultPkList()));
+
+    public static final String USER_AGENT_SUFFIX = System.getProperty("USER_AGENT_SUFFIX",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("USER_AGENT_SUFFIX")), ""));
+
+    public static final boolean SHOULD_PREINSERT = Boolean.parseBoolean(
+            System.getProperty("SHOULD_PREINSERT",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("SHOULD_PREINSERT")), "true")));
+
+    public static final List<String> READALL_PK_LIST = Arrays.asList(READALL_PK_VALUES.split(","));
+    
+    // Generate default PK list from 1 to 5000
+    private static String generateDefaultPkList() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i <= 5000; i++) {
+            if (i > 1) {
+                sb.append(",");
+            }
+            sb.append(i);
+        }
+        return sb.toString();
+    }
 }

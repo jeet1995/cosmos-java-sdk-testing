@@ -5,11 +5,15 @@ import com.azure.cosmos.CosmosAsyncClient;
 import com.azure.cosmos.CosmosAsyncContainer;
 import com.azure.cosmos.CosmosAsyncDatabase;
 import com.azure.cosmos.CosmosClientBuilder;
+import com.azure.cosmos.CosmosContainerProactiveInitConfigBuilder;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfig;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfigBuilder;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.GatewayConnectionConfig;
+import com.azure.cosmos.implementation.apachecommons.lang.StringUtils;
+import com.azure.cosmos.implementation.guava25.base.Strings;
 import com.azure.cosmos.models.CosmosClientTelemetryConfig;
+import com.azure.cosmos.models.CosmosContainerIdentity;
 import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.CosmosItemResponse;
 import com.azure.cosmos.models.CosmosQueryRequestOptions;
@@ -25,9 +29,11 @@ import reactor.core.scheduler.Schedulers;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class CosmosDRDrillTesting {
@@ -59,9 +65,31 @@ public class CosmosDRDrillTesting {
             .tenantId(Configurations.AAD_TENANT_ID)
             .build();
 
+    private static final boolean IS_PROACTIVE_CONNECTION_WARMUP_ENABLED = Boolean.parseBoolean(
+            System.getProperty("IS_PROACTIVE_CONNECTION_WARMUP_ENABLED",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IS_PROACTIVE_CONNECTION_WARMUP_ENABLED")), "false")));
+
+    private static final int AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS = Integer.parseInt(
+            System.getProperty("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS")), "60")));
+
+    private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
+
     public static void main(String[] args) {
 
-        Object waitObject = new Object();
+        // Add shutdown hook for graceful cleanup
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            logger.info("Shutdown hook triggered. Closing Cosmos clients...");
+            isShutdown.set(true);
+            for (CosmosAsyncClient client : cosmosAsyncClients) {
+                try {
+                    client.close();
+                } catch (Exception e) {
+                    logger.error("Error closing Cosmos client", e);
+                }
+            }
+            logger.info("All Cosmos clients closed.");
+        }));
 
         CosmosClientBuilder cosmosClientBuilder = new CosmosClientBuilder()
                 .endpoint(Configurations.endpoint)
@@ -70,6 +98,18 @@ public class CosmosDRDrillTesting {
         if (Configurations.CONNECTION_MODE_AS_STRING.equals("DIRECT")) {
             logger.info("Creating client in direct mode");
             cosmosClientBuilder = cosmosClientBuilder.directMode();
+
+            if (IS_PROACTIVE_CONNECTION_WARMUP_ENABLED) {
+                logger.info("Enabling proactive connection warmup with duration: {} seconds, database : {} and container : {}", AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS, Configurations.DATABASE_ID, Configurations.CONTAINER_ID);
+
+                CosmosContainerIdentity cosmosContainerIdentity = new CosmosContainerIdentity(Configurations.DATABASE_ID, Configurations.CONTAINER_ID);
+
+                CosmosContainerProactiveInitConfigBuilder cosmosContainerProactiveInitConfigBuilder = new CosmosContainerProactiveInitConfigBuilder(Collections.singletonList(cosmosContainerIdentity))
+                        .setAggressiveWarmupDuration(Duration.ofSeconds(AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS));
+
+                cosmosClientBuilder = cosmosClientBuilder.openConnectionsAndInitCaches(cosmosContainerProactiveInitConfigBuilder.build());
+            }
+
         } else if (Configurations.CONNECTION_MODE_AS_STRING.equals("GATEWAY")) {
             logger.info("Creating client in gateway mode");
             GatewayConnectionConfig gatewayConnectionConfig = GatewayConnectionConfig.getDefaultConfig();
@@ -92,7 +132,7 @@ public class CosmosDRDrillTesting {
             logger.info("Creating client {}", i);
 
             CosmosAsyncClient cosmosAsyncClient = cosmosClientBuilder
-                    .userAgentSuffix("client-" + i)
+                    .userAgentSuffix("client-" + (Configurations.USER_AGENT_SUFFIX.isEmpty() ? "" : "-" + Configurations.USER_AGENT_SUFFIX + "-") + i)
                     .clientTelemetryConfig(TELEMETRY_CONFIG.enableTransportLevelTracing())
                     .buildAsyncClient();
 
@@ -114,30 +154,73 @@ public class CosmosDRDrillTesting {
         //  Start the workload
         startWorkload();
 
-        synchronized (waitObject) {
+        // Wait for the specified duration or indefinitely if no duration is set
+        if (Configurations.WORKLOAD_DURATION_PARSED != null) {
+            logger.info("Workload will run for: {}", Configurations.WORKLOAD_DURATION_PARSED);
             try {
-                waitObject.wait();
+                Thread.sleep(Configurations.WORKLOAD_DURATION_PARSED.toMillis());
+                logger.info("Workload duration completed. Shutting down...");
             } catch (InterruptedException e) {
                 logger.warn("Main thread interrupted: {}", e.getMessage(), e);
+                throw new RuntimeException(e);
+            }
+        } else {
+            logger.info("Workload will run indefinitely. Press Ctrl+C to stop.");
+            Object waitObject = new Object();
+            synchronized (waitObject) {
                 try {
+                    waitObject.wait();
+                } catch (InterruptedException e) {
+                    logger.warn("Main thread interrupted: {}", e.getMessage(), e);
+                    try {
+                        throw e;
+                    } catch (InterruptedException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                } catch (IllegalMonitorStateException e) {
+                    logger.error("Illegal monitor state: {}", e.getMessage(), e);
                     throw e;
-                } catch (InterruptedException ex) {
-                    throw new RuntimeException(ex);
                 }
-            } catch (IllegalMonitorStateException e) {
-                logger.error("Illegal monitor state: {}", e.getMessage(), e);
-                throw e;
             }
         }
     }
 
     private static void startWorkload() {
+        // Determine which operations to execute based on configuration
+        List<Integer> availableOperations = new ArrayList<>();
+        
+        if (Configurations.ONLY_UPSERTS) {
+            availableOperations.add(0); // Upsert
+            logger.info("Workload configured to execute ONLY_UPSERTS");
+        } else if (Configurations.ONLY_READS) {
+            availableOperations.add(1); // Read
+            logger.info("Workload configured to execute ONLY_READS");
+        } else if (Configurations.ONLY_QUERIES) {
+            availableOperations.add(2); // Query
+            logger.info("Workload configured to execute ONLY_QUERIES");
+        } else if (Configurations.ONLY_READALL) {
+            availableOperations.add(3); // ReadAll
+            logger.info("Workload configured to execute ONLY_READALL with PK values: {}", Configurations.READALL_PK_LIST);
+        } else {
+            // Default behavior - all operations
+            availableOperations.add(0); // Upsert
+            availableOperations.add(1); // Read
+            availableOperations.add(2); // Query
+            availableOperations.add(3); // ReadAll
+            logger.info("Workload configured to execute all operation types (upserts, reads, queries, readAll)");
+        }
+        
+        if (availableOperations.isEmpty()) {
+            logger.error("No operations configured to execute. Exiting.");
+            return;
+        }
+        
         Mono.just(1)
-                .repeat()
+                .repeat(() -> !isShutdown.get())
                 .flatMap(integer -> {
-                    int random = ThreadLocalRandom.current().nextInt(3);
+                    int randomOperation = availableOperations.get(ThreadLocalRandom.current().nextInt(availableOperations.size()));
                     int containerId = ThreadLocalRandom.current().nextInt(Configurations.COSMOS_CLIENT_COUNT);
-                    switch (random) {
+                    switch (randomOperation) {
                         case 0:
                             return Configurations.QPS > 0
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
@@ -153,6 +236,11 @@ public class CosmosDRDrillTesting {
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
                                     .then(queryItem(cosmosAsyncContainers.get(containerId)))
                                     : queryItem(cosmosAsyncContainers.get(containerId));
+                        case 3:
+                            return Configurations.QPS > 0
+                                    ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
+                                    .then(readAllItems(cosmosAsyncContainers.get(containerId)))
+                                    : readAllItems(cosmosAsyncContainers.get(containerId));
                         default:
                             return Mono.empty();
                     }
@@ -228,7 +316,34 @@ public class CosmosDRDrillTesting {
 
     }
 
+    private static Mono<List<Pojo>> readAllItems(CosmosAsyncContainer cosmosAsyncContainer) {
+        // Select a random PK from the predefined list
+        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+        String pkValue = "pojo-pk-" + (finalI + 1);
+        
+        logger.debug("readAll items for pk: {}", pkValue);
+
+        return cosmosAsyncContainer.readAllItems(new PartitionKey(pkValue), Pojo.class)
+                .collectList()
+                .onErrorResume(throwable -> {
+                    logger.error("Error occurred while reading all items for pk: {}", pkValue, throwable);
+
+                    if (throwable instanceof CosmosException) {
+                        CosmosException cosmosException = (CosmosException) throwable;
+                        logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                    }
+
+                    return Mono.empty();
+                });
+    }
+
     private static void insertData(CosmosAsyncContainer cosmosAsyncContainer) {
+
+        if (!Configurations.SHOULD_PREINSERT) {
+            logger.info("Skipping initial data insertion as per configuration.");
+            return;
+        }
+
         logger.info("Inserting initial data...");
 
         AtomicInteger successfulInserts = new AtomicInteger(0);
