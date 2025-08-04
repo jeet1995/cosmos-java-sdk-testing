@@ -6,6 +6,7 @@ import com.azure.cosmos.CosmosAsyncContainer;
 import com.azure.cosmos.CosmosAsyncDatabase;
 import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.cosmos.CosmosContainerProactiveInitConfigBuilder;
+import com.azure.cosmos.CosmosDiagnosticsThresholds;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfig;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfigBuilder;
 import com.azure.cosmos.CosmosException;
@@ -76,6 +77,17 @@ public class CosmosDRDrillTesting {
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
+
+        //  Create diagnostics threshold
+        CosmosDiagnosticsThresholds cosmosDiagnosticsThresholds = new CosmosDiagnosticsThresholds();
+        //  These thresholds are for demo purposes
+        //  NOTE: Do not use the same thresholds for production
+        cosmosDiagnosticsThresholds.setPayloadSizeThreshold(100_00);
+        cosmosDiagnosticsThresholds.setPointOperationLatencyThreshold(Duration.ofMillis(50));
+        cosmosDiagnosticsThresholds.setNonPointOperationLatencyThreshold(Duration.ofSeconds(50));
+        cosmosDiagnosticsThresholds.setRequestChargeThreshold(100f);
+
+        TELEMETRY_CONFIG.diagnosticsThresholds(cosmosDiagnosticsThresholds);
 
         // Add shutdown hook for graceful cleanup
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
