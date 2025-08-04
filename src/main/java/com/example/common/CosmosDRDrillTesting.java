@@ -5,11 +5,16 @@ import com.azure.cosmos.CosmosAsyncClient;
 import com.azure.cosmos.CosmosAsyncContainer;
 import com.azure.cosmos.CosmosAsyncDatabase;
 import com.azure.cosmos.CosmosClientBuilder;
+import com.azure.cosmos.CosmosContainerProactiveInitConfigBuilder;
+import com.azure.cosmos.CosmosDiagnosticsThresholds;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfig;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfigBuilder;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.GatewayConnectionConfig;
+import com.azure.cosmos.implementation.apachecommons.lang.StringUtils;
+import com.azure.cosmos.implementation.guava25.base.Strings;
 import com.azure.cosmos.models.CosmosClientTelemetryConfig;
+import com.azure.cosmos.models.CosmosContainerIdentity;
 import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.CosmosItemResponse;
 import com.azure.cosmos.models.CosmosQueryRequestOptions;
@@ -25,6 +30,7 @@ import reactor.core.scheduler.Schedulers;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -60,9 +66,28 @@ public class CosmosDRDrillTesting {
             .tenantId(Configurations.AAD_TENANT_ID)
             .build();
 
+    private static final boolean IS_PROACTIVE_CONNECTION_WARMUP_ENABLED = Boolean.parseBoolean(
+            System.getProperty("IS_PROACTIVE_CONNECTION_WARMUP_ENABLED",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IS_PROACTIVE_CONNECTION_WARMUP_ENABLED")), "false")));
+
+    private static final int AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS = Integer.parseInt(
+            System.getProperty("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS")), "60")));
+
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
+
+        //  Create diagnostics threshold
+        CosmosDiagnosticsThresholds cosmosDiagnosticsThresholds = new CosmosDiagnosticsThresholds();
+        //  These thresholds are for demo purposes
+        //  NOTE: Do not use the same thresholds for production
+        cosmosDiagnosticsThresholds.setPayloadSizeThreshold(100_00);
+        cosmosDiagnosticsThresholds.setPointOperationLatencyThreshold(Duration.ofMillis(50));
+        cosmosDiagnosticsThresholds.setNonPointOperationLatencyThreshold(Duration.ofSeconds(50));
+        cosmosDiagnosticsThresholds.setRequestChargeThreshold(100f);
+
+        TELEMETRY_CONFIG.diagnosticsThresholds(cosmosDiagnosticsThresholds);
 
         // Add shutdown hook for graceful cleanup
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -85,6 +110,18 @@ public class CosmosDRDrillTesting {
         if (Configurations.CONNECTION_MODE_AS_STRING.equals("DIRECT")) {
             logger.info("Creating client in direct mode");
             cosmosClientBuilder = cosmosClientBuilder.directMode();
+
+            if (IS_PROACTIVE_CONNECTION_WARMUP_ENABLED) {
+                logger.info("Enabling proactive connection warmup with duration: {} seconds, database : {} and container : {}", AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS, Configurations.DATABASE_ID, Configurations.CONTAINER_ID);
+
+                CosmosContainerIdentity cosmosContainerIdentity = new CosmosContainerIdentity(Configurations.DATABASE_ID, Configurations.CONTAINER_ID);
+
+                CosmosContainerProactiveInitConfigBuilder cosmosContainerProactiveInitConfigBuilder = new CosmosContainerProactiveInitConfigBuilder(Collections.singletonList(cosmosContainerIdentity))
+                        .setAggressiveWarmupDuration(Duration.ofSeconds(AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS));
+
+                cosmosClientBuilder = cosmosClientBuilder.openConnectionsAndInitCaches(cosmosContainerProactiveInitConfigBuilder.build());
+            }
+
         } else if (Configurations.CONNECTION_MODE_AS_STRING.equals("GATEWAY")) {
             logger.info("Creating client in gateway mode");
             GatewayConnectionConfig gatewayConnectionConfig = GatewayConnectionConfig.getDefaultConfig();
