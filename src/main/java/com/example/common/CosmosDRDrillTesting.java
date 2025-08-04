@@ -107,7 +107,7 @@ public class CosmosDRDrillTesting {
             logger.info("Creating client {}", i);
 
             CosmosAsyncClient cosmosAsyncClient = cosmosClientBuilder
-                    .userAgentSuffix("client-" + i)
+                    .userAgentSuffix("client-" + (Configurations.USER_AGENT_SUFFIX.isEmpty() ? "" : "-" + Configurations.USER_AGENT_SUFFIX + "-") + i)
                     .clientTelemetryConfig(TELEMETRY_CONFIG.enableTransportLevelTracing())
                     .buildAsyncClient();
 
@@ -293,12 +293,12 @@ public class CosmosDRDrillTesting {
 
     private static Mono<List<Pojo>> readAllItems(CosmosAsyncContainer cosmosAsyncContainer) {
         // Select a random PK from the predefined list
-        String selectedPk = Configurations.READALL_PK_LIST.get(ThreadLocalRandom.current().nextInt(Configurations.READALL_PK_LIST.size()));
-        String pkValue = "pojo-pk-" + selectedPk;
+        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+        String pkValue = "pojo-pk-" + (finalI + 1);
         
         logger.debug("readAll items for pk: {}", pkValue);
 
-        return cosmosAsyncContainer.readAllItems(new PartitionKey(selectedPk), Pojo.class)
+        return cosmosAsyncContainer.readAllItems(new PartitionKey(pkValue), Pojo.class)
                 .collectList()
                 .onErrorResume(throwable -> {
                     logger.error("Error occurred while reading all items for pk: {}", pkValue, throwable);
@@ -313,6 +313,12 @@ public class CosmosDRDrillTesting {
     }
 
     private static void insertData(CosmosAsyncContainer cosmosAsyncContainer) {
+
+        if (!Configurations.SHOULD_PREINSERT) {
+            logger.info("Skipping initial data insertion as per configuration.");
+            return;
+        }
+
         logger.info("Inserting initial data...");
 
         AtomicInteger successfulInserts = new AtomicInteger(0);
