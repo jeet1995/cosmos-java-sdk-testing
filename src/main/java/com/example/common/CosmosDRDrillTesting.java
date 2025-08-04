@@ -84,7 +84,7 @@ public class CosmosDRDrillTesting {
         //  NOTE: Do not use the same thresholds for production
         cosmosDiagnosticsThresholds.setPayloadSizeThreshold(100_00);
         cosmosDiagnosticsThresholds.setPointOperationLatencyThreshold(Duration.ofMillis(50));
-        cosmosDiagnosticsThresholds.setNonPointOperationLatencyThreshold(Duration.ofSeconds(50));
+        cosmosDiagnosticsThresholds.setNonPointOperationLatencyThreshold(Duration.ofMillis(50));
         cosmosDiagnosticsThresholds.setRequestChargeThreshold(100f);
 
         TELEMETRY_CONFIG.diagnosticsThresholds(cosmosDiagnosticsThresholds);
