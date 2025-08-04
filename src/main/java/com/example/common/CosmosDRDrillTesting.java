@@ -28,6 +28,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class CosmosDRDrillTesting {
@@ -59,11 +60,14 @@ public class CosmosDRDrillTesting {
             .tenantId(Configurations.AAD_TENANT_ID)
             .build();
 
+    private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
+
     public static void main(String[] args) {
 
         // Add shutdown hook for graceful cleanup
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Shutdown hook triggered. Closing Cosmos clients...");
+            isShutdown.set(true);
             for (CosmosAsyncClient client : cosmosAsyncClients) {
                 try {
                     client.close();
@@ -187,7 +191,7 @@ public class CosmosDRDrillTesting {
         }
         
         Mono.just(1)
-                .repeat()
+                .repeat(() -> !isShutdown.get())
                 .flatMap(integer -> {
                     int randomOperation = availableOperations.get(ThreadLocalRandom.current().nextInt(availableOperations.size()));
                     int containerId = ThreadLocalRandom.current().nextInt(Configurations.COSMOS_CLIENT_COUNT);
