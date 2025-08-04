@@ -76,7 +76,7 @@ public class Configurations {
     public static final boolean SHOULD_PREINSERT = Boolean.parseBoolean(
             System.getProperty("SHOULD_PREINSERT",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("SHOULD_PREINSERT")), "true")));
-    
+
     public static final List<String> READALL_PK_LIST = Arrays.asList(READALL_PK_VALUES.split(","));
     
     // Generate default PK list from 1 to 5000
