@@ -69,7 +69,14 @@ public class Configurations {
     // Predefined PK values for readAll workload (comma-separated integers)
     public static final String READALL_PK_VALUES = System.getProperty("READALL_PK_VALUES",
             StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("READALL_PK_VALUES")), generateDefaultPkList()));
-    
+
+    public static final String USER_AGENT_SUFFIX = System.getProperty("USER_AGENT_SUFFIX",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("USER_AGENT_SUFFIX")), ""));
+
+    public static final boolean SHOULD_PREINSERT = Boolean.parseBoolean(
+            System.getProperty("SHOULD_PREINSERT",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("SHOULD_PREINSERT")), "true")));
+
     public static final List<String> READALL_PK_LIST = Arrays.asList(READALL_PK_VALUES.split(","));
     
     // Generate default PK list from 1 to 5000
