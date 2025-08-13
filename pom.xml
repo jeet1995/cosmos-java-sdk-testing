@@ -13,67 +13,6 @@
     <maven.compiler.target>8</maven.compiler.target>
   </properties>
 
-<!--  <dependencyManagement>-->
-<!--    <dependencies>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-handler</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-handler-proxy</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-buffer</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-codec</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-codec-http</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-codec-http2</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-transport-native-unix-common</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-transport-native-epoll</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-transport-native-kqueue</artifactId>-->
-<!--        <version>4.1.101.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.netty</groupId>-->
-<!--        <artifactId>netty-tcnative-boringssl-static</artifactId>-->
-<!--        <version>2.0.61.Final</version>-->
-<!--      </dependency>-->
-<!--      <dependency>-->
-<!--        <groupId>io.projectreactor.netty</groupId>-->
-<!--        <artifactId>reactor-netty-http</artifactId>-->
-<!--        <version>1.0.39</version>-->
-<!--      </dependency>-->
-<!--    </dependencies>-->
-<!--  </dependencyManagement>-->
-
-
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -82,6 +21,11 @@
         <version>4.1.101.Final</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.projectreactor.netty</groupId>
+        <artifactId>reactor-netty-http</artifactId>
+        <version>1.0.38</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
