@@ -74,6 +74,9 @@ public class CosmosDRDrillTesting {
             System.getProperty("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS")), "60")));
 
+    private static final String COMMA_SEPARATED_CONTAINER_LIST_FOR_CONNECTION_WARM_UP = System.getProperty("COMMA_SEPARATED_CONTAINER_LIST",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("COMMA_SEPARATED_CONTAINER_LIST")), ""));
+
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
@@ -116,7 +119,20 @@ public class CosmosDRDrillTesting {
 
                 CosmosContainerIdentity cosmosContainerIdentity = new CosmosContainerIdentity(Configurations.DATABASE_ID, Configurations.CONTAINER_ID);
 
-                CosmosContainerProactiveInitConfigBuilder cosmosContainerProactiveInitConfigBuilder = new CosmosContainerProactiveInitConfigBuilder(Collections.singletonList(cosmosContainerIdentity))
+                String[] commaSeparatedContainerArrayForConnectionWarmUp = COMMA_SEPARATED_CONTAINER_LIST_FOR_CONNECTION_WARM_UP.split(",");
+                List<String> commaSeparatedContainerListForConnectionWarmUp = new ArrayList<>(Arrays.asList(commaSeparatedContainerArrayForConnectionWarmUp));
+                List<CosmosContainerIdentity> cosmosContainerIdentityList = new ArrayList<>();
+                cosmosContainerIdentityList.add(cosmosContainerIdentity);
+
+                for (String containerForConnectionWarmUp : commaSeparatedContainerListForConnectionWarmUp) {
+                    String trimmedContainerName = containerForConnectionWarmUp.trim();
+                    if (!trimmedContainerName.isEmpty()) {
+                        logger.info("Adding container {} for proactive connection warmup", trimmedContainerName);
+                        cosmosContainerIdentityList.add(new CosmosContainerIdentity(Configurations.DATABASE_ID, trimmedContainerName));
+                    }
+                }
+
+                CosmosContainerProactiveInitConfigBuilder cosmosContainerProactiveInitConfigBuilder = new CosmosContainerProactiveInitConfigBuilder(cosmosContainerIdentityList)
                         .setAggressiveWarmupDuration(Duration.ofSeconds(AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS));
 
                 cosmosClientBuilder = cosmosClientBuilder.openConnectionsAndInitCaches(cosmosContainerProactiveInitConfigBuilder.build());
@@ -212,7 +228,10 @@ public class CosmosDRDrillTesting {
             logger.info("Workload configured to execute ONLY_QUERIES");
         } else if (Configurations.ONLY_READALL) {
             availableOperations.add(3); // ReadAll
-            logger.info("Workload configured to execute ONLY_READALL with PK values: {}", Configurations.READALL_PK_LIST);
+            logger.info("Workload configured to execute ONLY_READALL");
+        } else if (Configurations.ONLY_UNPARAMETERIZED_QUERIES) {
+            availableOperations.add(4);
+            logger.info("Workload configured to execute ONLY_UNPARAMETERIZED_QUERIES");
         } else {
             // Default behavior - all operations
             availableOperations.add(0); // Upsert
@@ -253,6 +272,11 @@ public class CosmosDRDrillTesting {
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
                                     .then(readAllItems(cosmosAsyncContainers.get(containerId)))
                                     : readAllItems(cosmosAsyncContainers.get(containerId));
+                        case 4:
+                            return Configurations.QPS > 0
+                                    ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
+                                    .then(unParameterizedQueryItems(cosmosAsyncContainers.get(containerId)))
+                                    : unParameterizedQueryItems(cosmosAsyncContainers.get(containerId));
                         default:
                             return Mono.empty();
                     }
@@ -325,7 +349,27 @@ public class CosmosDRDrillTesting {
 
                     return Mono.empty();
                 });
+    }
 
+    private static Mono<List<Pojo>> unParameterizedQueryItems(CosmosAsyncContainer cosmosAsyncContainer) {
+        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+        logger.debug("query item: {}", finalI);
+        Pojo item = getItem(finalI, finalI);
+
+        String queryString = "SELECT * FROM c WHERE c.id='" + item.getId() + "' AND c.pk='" + item.getPk() + "'";
+
+        return cosmosAsyncContainer.queryItems(queryString, QUERY_REQ_OPTS, Pojo.class)
+                .collectList()
+                .onErrorResume(throwable -> {
+                    logger.error("Error occurred while querying item", throwable);
+
+                    if (throwable instanceof CosmosException) {
+                        CosmosException cosmosException = (CosmosException) throwable;
+                        logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                    }
+
+                    return Mono.empty();
+                });
     }
 
     private static Mono<List<Pojo>> readAllItems(CosmosAsyncContainer cosmosAsyncContainer) {
