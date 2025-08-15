@@ -74,8 +74,8 @@ public class CosmosDRDrillTesting {
             System.getProperty("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS")), "60")));
 
-    private static final String COMMA_SEPARATED_CONTAINER_LIST_FOR_CONNECTION_WARM_UP = System.getProperty("COMMA_SEPARATED_CONTAINER_LIST",
-            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("COMMA_SEPARATED_CONTAINER_LIST")), ""));
+    private static final String COMMA_SEPARATED_CONTAINER_LIST_FOR_CONNECTION_WARM_UP = System.getProperty("COMMA_SEPARATED_CONTAINER_LIST_FOR_CONNECTION_WARM_UP",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("COMMA_SEPARATED_CONTAINER_LIST_FOR_CONNECTION_WARM_UP")), ""));
 
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
