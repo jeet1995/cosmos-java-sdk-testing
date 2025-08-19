@@ -266,7 +266,7 @@ public class CosmosDRDrillTesting {
     }
 
     private static Mono<CosmosItemResponse<Pojo>> upsertItem(CosmosAsyncContainer cosmosAsyncContainer) {
-        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+        int finalI = ThreadLocalRandom.current().nextInt((int) (Configurations.PARTITION_SKEW_FACTOR * Configurations.TOTAL_NUMBER_OF_DOCUMENTS));
 
         Pojo item = getItem(finalI, finalI);
 
@@ -287,7 +287,7 @@ public class CosmosDRDrillTesting {
 
     private static Mono<CosmosItemResponse<Pojo>> readItem(CosmosAsyncContainer cosmosAsyncContainer) {
 
-        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+        int finalI = ThreadLocalRandom.current().nextInt((int) (Configurations.PARTITION_SKEW_FACTOR * Configurations.TOTAL_NUMBER_OF_DOCUMENTS));
         logger.debug("read item: {}", finalI);
         Pojo item = getItem(finalI, finalI);
         return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), POINT_REQ_OPTS, Pojo.class)
@@ -306,7 +306,7 @@ public class CosmosDRDrillTesting {
 
     private static Mono<List<Pojo>> queryItem(CosmosAsyncContainer cosmosAsyncContainer) {
 
-        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+        int finalI = ThreadLocalRandom.current().nextInt((int) (Configurations.PARTITION_SKEW_FACTOR * Configurations.TOTAL_NUMBER_OF_DOCUMENTS));
         logger.debug("query item: {}", finalI);
         Pojo item = getItem(finalI, finalI);
 
@@ -330,7 +330,7 @@ public class CosmosDRDrillTesting {
 
     private static Mono<List<Pojo>> readAllItems(CosmosAsyncContainer cosmosAsyncContainer) {
         // Select a random PK from the predefined list
-        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+        int finalI = ThreadLocalRandom.current().nextInt((int) (Configurations.PARTITION_SKEW_FACTOR * Configurations.TOTAL_NUMBER_OF_DOCUMENTS));
         String pkValue = "pojo-pk-" + (finalI + 1);
         
         logger.debug("readAll items for pk: {}", pkValue);
