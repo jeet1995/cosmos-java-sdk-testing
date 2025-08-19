@@ -77,6 +77,10 @@ public class Configurations {
             System.getProperty("SHOULD_PREINSERT",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("SHOULD_PREINSERT")), "true")));
 
+    public static final Double PARTITION_SKEW_FACTOR = Double.parseDouble(
+            System.getProperty("PARTITION_SKEW_FACTOR",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("PARTITION_SKEW_FACTOR")), "1.0")));
+
     public static final List<String> READALL_PK_LIST = Arrays.asList(READALL_PK_VALUES.split(","));
     
     // Generate default PK list from 1 to 5000
