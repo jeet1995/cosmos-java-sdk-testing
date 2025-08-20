@@ -10,6 +10,7 @@ import com.azure.cosmos.CosmosDiagnosticsThresholds;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfig;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfigBuilder;
 import com.azure.cosmos.CosmosException;
+import com.azure.cosmos.DirectConnectionConfig;
 import com.azure.cosmos.GatewayConnectionConfig;
 import com.azure.cosmos.implementation.apachecommons.lang.StringUtils;
 import com.azure.cosmos.implementation.guava25.base.Strings;
@@ -74,6 +75,12 @@ public class CosmosDRDrillTesting {
             System.getProperty("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS")), "60")));
 
+    private static final Duration IDLE_CONNECTION_TIMEOUT = Duration.parse(System.getProperty("IDLE_CONNECTION_TIMEOUT",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IDLE_CONNECTION_TIMEOUT")), "PT0S")));
+
+    private static final Duration IDLE_ENDPOINT_TIMEOUT = Duration.parse(System.getProperty("IDLE_ENDPOINT_TIMEOUT",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IDLE_ENDPOINT_TIMEOUT")), "PT1H")));
+
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
@@ -109,7 +116,11 @@ public class CosmosDRDrillTesting {
 
         if (Configurations.CONNECTION_MODE_AS_STRING.equals("DIRECT")) {
             logger.info("Creating client in direct mode");
-            cosmosClientBuilder = cosmosClientBuilder.directMode();
+            DirectConnectionConfig directConnectionConfig = DirectConnectionConfig.getDefaultConfig()
+                    .setIdleConnectionTimeout(IDLE_CONNECTION_TIMEOUT)
+                    .setIdleEndpointTimeout(IDLE_ENDPOINT_TIMEOUT);
+
+            cosmosClientBuilder = cosmosClientBuilder.directMode(directConnectionConfig);
 
             if (IS_PROACTIVE_CONNECTION_WARMUP_ENABLED) {
                 logger.info("Enabling proactive connection warmup with duration: {} seconds, database : {} and container : {}", AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS, Configurations.DATABASE_ID, Configurations.CONTAINER_ID);
@@ -212,7 +223,7 @@ public class CosmosDRDrillTesting {
             logger.info("Workload configured to execute ONLY_QUERIES");
         } else if (Configurations.ONLY_READALL) {
             availableOperations.add(3); // ReadAll
-            logger.info("Workload configured to execute ONLY_READALL with PK values: {}", Configurations.READALL_PK_LIST);
+            logger.info("Workload configured to execute ONLY_READALL");
         } else {
             // Default behavior - all operations
             availableOperations.add(0); // Upsert
