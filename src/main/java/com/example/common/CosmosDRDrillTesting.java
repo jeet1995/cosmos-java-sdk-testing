@@ -1,6 +1,7 @@
 package com.example.common;
 
 import com.azure.core.credential.TokenCredential;
+import com.azure.cosmos.ConsistencyLevel;
 import com.azure.cosmos.CosmosAsyncClient;
 import com.azure.cosmos.CosmosAsyncContainer;
 import com.azure.cosmos.CosmosAsyncDatabase;
@@ -10,6 +11,7 @@ import com.azure.cosmos.CosmosDiagnosticsThresholds;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfig;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfigBuilder;
 import com.azure.cosmos.CosmosException;
+import com.azure.cosmos.DirectConnectionConfig;
 import com.azure.cosmos.GatewayConnectionConfig;
 import com.azure.cosmos.implementation.apachecommons.lang.StringUtils;
 import com.azure.cosmos.implementation.guava25.base.Strings;
@@ -18,9 +20,21 @@ import com.azure.cosmos.models.CosmosContainerIdentity;
 import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.CosmosItemResponse;
 import com.azure.cosmos.models.CosmosQueryRequestOptions;
+import com.azure.cosmos.models.FeedRange;
 import com.azure.cosmos.models.PartitionKey;
 import com.azure.cosmos.models.SqlParameter;
 import com.azure.cosmos.models.SqlQuerySpec;
+import com.azure.cosmos.test.faultinjection.CosmosFaultInjectionHelper;
+import com.azure.cosmos.test.faultinjection.FaultInjectionCondition;
+import com.azure.cosmos.test.faultinjection.FaultInjectionConditionBuilder;
+import com.azure.cosmos.test.faultinjection.FaultInjectionConnectionType;
+import com.azure.cosmos.test.faultinjection.FaultInjectionEndpointBuilder;
+import com.azure.cosmos.test.faultinjection.FaultInjectionOperationType;
+import com.azure.cosmos.test.faultinjection.FaultInjectionResultBuilders;
+import com.azure.cosmos.test.faultinjection.FaultInjectionRule;
+import com.azure.cosmos.test.faultinjection.FaultInjectionRuleBuilder;
+import com.azure.cosmos.test.faultinjection.FaultInjectionServerErrorResult;
+import com.azure.cosmos.test.faultinjection.FaultInjectionServerErrorType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.azure.identity.DefaultAzureCredentialBuilder;
@@ -48,6 +62,7 @@ public class CosmosDRDrillTesting {
     private static List<CosmosAsyncContainer> cosmosAsyncContainers = new ArrayList<>();
 
     private static final CosmosEndToEndOperationLatencyPolicyConfig SIX_SECOND_E2E_TIMEOUT = new CosmosEndToEndOperationLatencyPolicyConfigBuilder(Duration.ofSeconds(6)).build();
+    private static final CosmosEndToEndOperationLatencyPolicyConfig TWO_SECOND_E2E_TIMEOUT = new CosmosEndToEndOperationLatencyPolicyConfigBuilder(Duration.ofSeconds(2)).build();
 
     private static final CosmosItemRequestOptions POINT_REQ_OPTS = new CosmosItemRequestOptions()
             .setCosmosEndToEndOperationLatencyPolicyConfig(SIX_SECOND_E2E_TIMEOUT);
@@ -73,6 +88,10 @@ public class CosmosDRDrillTesting {
     private static final int AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS = Integer.parseInt(
             System.getProperty("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS")), "60")));
+
+    private static final boolean IS_WALMART_CART_REPRO_MODE = Boolean.parseBoolean(
+            System.getProperty("IS_WALMART_CART_REPRO_MODE",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IS_WALMART_CART_REPRO_MODE")), "false")));
 
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
@@ -137,6 +156,18 @@ public class CosmosDRDrillTesting {
         } else {
             logger.info("Using key-based authentication");
             cosmosClientBuilder = cosmosClientBuilder.key(Configurations.key);
+        }
+
+        if (IS_WALMART_CART_REPRO_MODE) {
+
+            DirectConnectionConfig directConnectionConfig = DirectConnectionConfig.getDefaultConfig();
+
+            directConnectionConfig.setConnectTimeout(Duration.ofSeconds(1));
+            directConnectionConfig.setIdleConnectionTimeout(Duration.ofDays(1));
+            directConnectionConfig.setIdleEndpointTimeout(Duration.ofDays(1));
+            directConnectionConfig.setNetworkRequestTimeout(Duration.ofMillis(1500));
+
+            cosmosClientBuilder = cosmosClientBuilder.directMode(directConnectionConfig).consistencyLevel(ConsistencyLevel.SESSION);
         }
 
         for (int i = 0; i < Configurations.COSMOS_CLIENT_COUNT; i++) {
@@ -287,21 +318,71 @@ public class CosmosDRDrillTesting {
 
     private static Mono<CosmosItemResponse<Pojo>> readItem(CosmosAsyncContainer cosmosAsyncContainer) {
 
-        int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
-        logger.debug("read item: {}", finalI);
-        Pojo item = getItem(finalI, finalI);
-        return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), POINT_REQ_OPTS, Pojo.class)
-                .onErrorResume(throwable -> {
-                    logger.error("Error occurred while reading item", throwable);
+        if (IS_WALMART_CART_REPRO_MODE) {
 
-                    if (throwable instanceof CosmosException) {
-                        CosmosException cosmosException = (CosmosException) throwable;
-                        logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
-                    }
+            try {
+                FeedRange fullRange = FeedRange.forFullRange();
 
-                    return Mono.empty();
-                });
+                FaultInjectionServerErrorResult responseDelay = FaultInjectionResultBuilders
+                        .getResultBuilder(FaultInjectionServerErrorType.PARTITION_IS_MIGRATING)
+                        // 30% hit rate
+                        .injectionRate(0.3)
+                        .suppressServiceRequests(false)
+                        .build();
 
+                FaultInjectionCondition condition = new FaultInjectionConditionBuilder()
+                        .connectionType(FaultInjectionConnectionType.DIRECT)
+                        .endpoints(new FaultInjectionEndpointBuilder(fullRange).build())
+                        .operationType(FaultInjectionOperationType.QUERY_ITEM)
+                        .region(Configurations.PREFERRED_REGIONS.get(0))
+                        .build();
+
+                String ruleId = String.format("partition-is-migrating-error%s", UUID.randomUUID());
+
+                FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
+                        .condition(condition)
+                        .result(responseDelay);
+
+                FaultInjectionRule faultInjectionRule = ruleBuilder.build();
+
+                CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainer, Arrays.asList(faultInjectionRule)).block();
+            } catch (Exception e) {
+                logger.warn("Could not configure fault injection rule for case 4: {}", e.getMessage());
+            }
+
+            int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+            logger.debug("read item: {}", finalI);
+            Pojo item = getItem(finalI, finalI);
+            return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), new CosmosItemRequestOptions().setCosmosEndToEndOperationLatencyPolicyConfig(TWO_SECOND_E2E_TIMEOUT), Pojo.class)
+                    .onErrorResume(throwable -> {
+                        logger.error("Error occurred while reading item", throwable);
+
+                        if (throwable instanceof CosmosException) {
+                            CosmosException cosmosException = (CosmosException) throwable;
+                            logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        }
+
+                        return Mono.empty();
+                    });
+
+        } else {
+
+            int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+            logger.debug("read item: {}", finalI);
+            Pojo item = getItem(finalI, finalI);
+            return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), POINT_REQ_OPTS, Pojo.class)
+                    .onErrorResume(throwable -> {
+                        logger.error("Error occurred while reading item", throwable);
+
+                        if (throwable instanceof CosmosException) {
+                            CosmosException cosmosException = (CosmosException) throwable;
+                            logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        }
+
+                        return Mono.empty();
+                    });
+
+        }
     }
 
     private static Mono<List<Pojo>> queryItem(CosmosAsyncContainer cosmosAsyncContainer) {
