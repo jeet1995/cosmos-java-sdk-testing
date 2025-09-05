@@ -355,9 +355,18 @@ public class CosmosDRDrillTesting {
         if (IS_WALMART_CART_REPRO_MODE) {
 
             int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
+            CosmosItemRequestOptions cosmosItemRequestOptions = new CosmosItemRequestOptions();
+            cosmosItemRequestOptions.setCosmosEndToEndOperationLatencyPolicyConfig(TWO_SECOND_E2E_TIMEOUT);
+
+            if (finalI % 2 == 0) {
+                cosmosItemRequestOptions.setConsistencyLevel(ConsistencyLevel.EVENTUAL);
+            } else {
+                cosmosItemRequestOptions.setConsistencyLevel(ConsistencyLevel.SESSION);
+            }
+
             logger.debug("read item: {}", finalI);
             Pojo item = getItem(finalI, finalI);
-            return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), new CosmosItemRequestOptions().setCosmosEndToEndOperationLatencyPolicyConfig(TWO_SECOND_E2E_TIMEOUT), Pojo.class)
+            return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), cosmosItemRequestOptions, Pojo.class)
                     .onErrorResume(throwable -> {
                         logger.error("Error occurred while reading item", throwable);
 
