@@ -160,6 +160,8 @@ public class CosmosDRDrillTesting {
 
         if (IS_WALMART_CART_REPRO_MODE) {
 
+            logger.info("Using WALMART CART repro-mode settings");
+
             DirectConnectionConfig directConnectionConfig = DirectConnectionConfig.getDefaultConfig();
 
             directConnectionConfig.setConnectTimeout(Duration.ofSeconds(1));
