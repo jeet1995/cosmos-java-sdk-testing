@@ -259,7 +259,39 @@ public class CosmosDRDrillTesting {
             logger.error("No operations configured to execute. Exiting.");
             return;
         }
-        
+
+        if (IS_WALMART_CART_REPRO_MODE) {
+            try {
+                FeedRange fullRange = FeedRange.forFullRange();
+
+                FaultInjectionServerErrorResult partitionIsMigratingError = FaultInjectionResultBuilders
+                        .getResultBuilder(FaultInjectionServerErrorType.PARTITION_IS_MIGRATING)
+                        // 30% hit rate
+                        .injectionRate(0.3)
+                        .suppressServiceRequests(false)
+                        .build();
+
+                FaultInjectionCondition condition = new FaultInjectionConditionBuilder()
+                        .connectionType(FaultInjectionConnectionType.DIRECT)
+                        .endpoints(new FaultInjectionEndpointBuilder(fullRange).build())
+                        .operationType(FaultInjectionOperationType.READ_ITEM)
+                        .region(Configurations.PREFERRED_REGIONS.get(0))
+                        .build();
+
+                String ruleId = String.format("partition-is-migrating-error-%s", UUID.randomUUID());
+
+                FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
+                        .condition(condition)
+                        .result(partitionIsMigratingError);
+
+                FaultInjectionRule faultInjectionRule = ruleBuilder.build();
+
+                CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainers.get(ThreadLocalRandom.current().nextInt(Configurations.COSMOS_CLIENT_COUNT)), Arrays.asList(faultInjectionRule)).block();
+            } catch (Exception e) {
+                logger.warn("Could not configure fault injection rule for case 4: {}", e.getMessage());
+            }
+        }
+
         Mono.just(1)
                 .repeat(() -> !isShutdown.get())
                 .flatMap(integer -> {
@@ -321,36 +353,6 @@ public class CosmosDRDrillTesting {
     private static Mono<CosmosItemResponse<Pojo>> readItem(CosmosAsyncContainer cosmosAsyncContainer) {
 
         if (IS_WALMART_CART_REPRO_MODE) {
-
-            try {
-                FeedRange fullRange = FeedRange.forFullRange();
-
-                FaultInjectionServerErrorResult partitionIsMigratingError = FaultInjectionResultBuilders
-                        .getResultBuilder(FaultInjectionServerErrorType.PARTITION_IS_MIGRATING)
-                        // 30% hit rate
-                        .injectionRate(0.3)
-                        .suppressServiceRequests(false)
-                        .build();
-
-                FaultInjectionCondition condition = new FaultInjectionConditionBuilder()
-                        .connectionType(FaultInjectionConnectionType.DIRECT)
-                        .endpoints(new FaultInjectionEndpointBuilder(fullRange).build())
-                        .operationType(FaultInjectionOperationType.READ_ITEM)
-                        .region(Configurations.PREFERRED_REGIONS.get(0))
-                        .build();
-
-                String ruleId = String.format("partition-is-migrating-error-%s", UUID.randomUUID());
-
-                FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
-                        .condition(condition)
-                        .result(partitionIsMigratingError);
-
-                FaultInjectionRule faultInjectionRule = ruleBuilder.build();
-
-                CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainer, Arrays.asList(faultInjectionRule)).block();
-            } catch (Exception e) {
-                logger.warn("Could not configure fault injection rule for case 4: {}", e.getMessage());
-            }
 
             int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
             logger.debug("read item: {}", finalI);
