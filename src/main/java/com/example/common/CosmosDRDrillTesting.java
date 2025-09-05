@@ -267,7 +267,15 @@ public class CosmosDRDrillTesting {
                 FaultInjectionServerErrorResult partitionIsMigratingError = FaultInjectionResultBuilders
                         .getResultBuilder(FaultInjectionServerErrorType.PARTITION_IS_MIGRATING)
                         // 30% hit rate
-                        .injectionRate(0.3)
+                        .injectionRate(0.1)
+                        .times(1)
+                        .suppressServiceRequests(false)
+                        .build();
+                FaultInjectionServerErrorResult goneError = FaultInjectionResultBuilders
+                        .getResultBuilder(FaultInjectionServerErrorType.GONE)
+                        // 30% hit rate
+                        .injectionRate(0.1)
+                        .times(1)
                         .suppressServiceRequests(false)
                         .build();
 
@@ -279,16 +287,21 @@ public class CosmosDRDrillTesting {
                         .build();
 
                 String ruleId = String.format("partition-is-migrating-error-%s", UUID.randomUUID());
+                String goneRule = String.format("gone-error-%s", UUID.randomUUID());
 
                 FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
                         .condition(condition)
                         .result(partitionIsMigratingError);
+                FaultInjectionRuleBuilder goneRuleBuilder = new FaultInjectionRuleBuilder(ruleId)
+                        .condition(condition)
+                        .result(goneError);
 
-                FaultInjectionRule faultInjectionRule = ruleBuilder.build();
+                FaultInjectionRule partitionIsMigratingFIRule = ruleBuilder.build();
+                FaultInjectionRule goneFIRule = goneRuleBuilder.build();
 
-                CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainers.get(ThreadLocalRandom.current().nextInt(Configurations.COSMOS_CLIENT_COUNT)), Arrays.asList(faultInjectionRule)).block();
+                CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainers.get(ThreadLocalRandom.current().nextInt(Configurations.COSMOS_CLIENT_COUNT)), Arrays.asList(partitionIsMigratingFIRule, goneFIRule)).block();
             } catch (Exception e) {
-                logger.warn("Could not configure fault injection rule for case 4: {}", e.getMessage());
+                logger.warn("Could not configure fault injection rule for reads hitting partition is migrating and gone: {}", e.getMessage());
             }
         }
 
