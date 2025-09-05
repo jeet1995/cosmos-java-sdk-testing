@@ -323,7 +323,7 @@ public class CosmosDRDrillTesting {
             try {
                 FeedRange fullRange = FeedRange.forFullRange();
 
-                FaultInjectionServerErrorResult responseDelay = FaultInjectionResultBuilders
+                FaultInjectionServerErrorResult partitionIsMigratingError = FaultInjectionResultBuilders
                         .getResultBuilder(FaultInjectionServerErrorType.PARTITION_IS_MIGRATING)
                         // 30% hit rate
                         .injectionRate(0.3)
@@ -333,15 +333,15 @@ public class CosmosDRDrillTesting {
                 FaultInjectionCondition condition = new FaultInjectionConditionBuilder()
                         .connectionType(FaultInjectionConnectionType.DIRECT)
                         .endpoints(new FaultInjectionEndpointBuilder(fullRange).build())
-                        .operationType(FaultInjectionOperationType.QUERY_ITEM)
+                        .operationType(FaultInjectionOperationType.READ_ITEM)
                         .region(Configurations.PREFERRED_REGIONS.get(0))
                         .build();
 
-                String ruleId = String.format("partition-is-migrating-error%s", UUID.randomUUID());
+                String ruleId = String.format("partition-is-migrating-error-%s", UUID.randomUUID());
 
                 FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
                         .condition(condition)
-                        .result(responseDelay);
+                        .result(partitionIsMigratingError);
 
                 FaultInjectionRule faultInjectionRule = ruleBuilder.build();
 
