@@ -266,14 +266,14 @@ public class CosmosDRDrillTesting {
 
                 FaultInjectionServerErrorResult partitionIsMigratingError = FaultInjectionResultBuilders
                         .getResultBuilder(FaultInjectionServerErrorType.PARTITION_IS_MIGRATING)
-                        // 30% hit rate
+                        // 10% hit rate
                         .injectionRate(0.1)
                         .times(1)
                         .suppressServiceRequests(false)
                         .build();
                 FaultInjectionServerErrorResult goneError = FaultInjectionResultBuilders
                         .getResultBuilder(FaultInjectionServerErrorType.GONE)
-                        // 30% hit rate
+                        // 10% hit rate
                         .injectionRate(0.1)
                         .times(1)
                         .suppressServiceRequests(false)
@@ -287,12 +287,12 @@ public class CosmosDRDrillTesting {
                         .build();
 
                 String ruleId = String.format("partition-is-migrating-error-%s", UUID.randomUUID());
-                String goneRule = String.format("gone-error-%s", UUID.randomUUID());
+                String goneRuleId = String.format("gone-error-%s", UUID.randomUUID());
 
                 FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
                         .condition(condition)
                         .result(partitionIsMigratingError);
-                FaultInjectionRuleBuilder goneRuleBuilder = new FaultInjectionRuleBuilder(ruleId)
+                FaultInjectionRuleBuilder goneRuleBuilder = new FaultInjectionRuleBuilder(goneRuleId)
                         .condition(condition)
                         .result(goneError);
 
