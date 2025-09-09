@@ -271,10 +271,19 @@ public class CosmosDRDrillTesting {
                         .times(1)
                         .suppressServiceRequests(false)
                         .build();
+
                 FaultInjectionServerErrorResult goneError = FaultInjectionResultBuilders
                         .getResultBuilder(FaultInjectionServerErrorType.GONE)
                         // 10% hit rate
                         .injectionRate(0.1)
+                        .times(1)
+                        .suppressServiceRequests(false)
+                        .build();
+
+                FaultInjectionServerErrorResult responseDelay = FaultInjectionResultBuilders
+                        .getResultBuilder(FaultInjectionServerErrorType.RESPONSE_DELAY)
+                        // 50% hit rate
+                        .injectionRate(0.5)
                         .times(1)
                         .suppressServiceRequests(false)
                         .build();
@@ -286,8 +295,26 @@ public class CosmosDRDrillTesting {
                         .region(Configurations.PREFERRED_REGIONS.get(0))
                         .build();
 
+                FaultInjectionCondition addressRefreshRequestCondition = new FaultInjectionConditionBuilder()
+                        .operationType(FaultInjectionOperationType.METADATA_REQUEST_ADDRESS_REFRESH)
+                        .region(Configurations.PREFERRED_REGIONS.get(0))
+                        .build();
+
+                FaultInjectionCondition collectionRequestCondition = new FaultInjectionConditionBuilder()
+                        .operationType(FaultInjectionOperationType.METADATA_REQUEST_CONTAINER)
+                        .region(Configurations.PREFERRED_REGIONS.get(0))
+                        .build();
+
+                FaultInjectionCondition partitionKeyRangesRequestCondition = new FaultInjectionConditionBuilder()
+                        .operationType(FaultInjectionOperationType.METADATA_REQUEST_PARTITION_KEY_RANGES)
+                        .region(Configurations.PREFERRED_REGIONS.get(0))
+                        .build();
+
                 String ruleId = String.format("partition-is-migrating-error-%s", UUID.randomUUID());
                 String goneRuleId = String.format("gone-error-%s", UUID.randomUUID());
+                String addressRequestDelayRuleId = String.format("address-request-delay-error-%s", UUID.randomUUID());
+                String collectionRequestDelayRuleId = String.format("collection-request-delay-error-%s", UUID.randomUUID());
+                String pkRangeRequestDelayRuleId = String.format("pkrange-request-delay-error-%s", UUID.randomUUID());
 
                 FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
                         .condition(condition)
@@ -295,11 +322,23 @@ public class CosmosDRDrillTesting {
                 FaultInjectionRuleBuilder goneRuleBuilder = new FaultInjectionRuleBuilder(goneRuleId)
                         .condition(condition)
                         .result(goneError);
+                FaultInjectionRuleBuilder addressRequestResponseDelayRuleBuilder = new FaultInjectionRuleBuilder(addressRequestDelayRuleId)
+                        .condition(addressRefreshRequestCondition)
+                        .result(responseDelay);
+                FaultInjectionRuleBuilder collectionRequestResponseDelayRuleBuilder = new FaultInjectionRuleBuilder(collectionRequestDelayRuleId)
+                        .condition(collectionRequestCondition)
+                        .result(responseDelay);
+                FaultInjectionRuleBuilder pkRangeRequestResponseDelayRuleBuilder = new FaultInjectionRuleBuilder(pkRangeRequestDelayRuleId)
+                        .condition(partitionKeyRangesRequestCondition)
+                        .result(responseDelay);
 
                 FaultInjectionRule partitionIsMigratingFIRule = ruleBuilder.build();
                 FaultInjectionRule goneFIRule = goneRuleBuilder.build();
+                FaultInjectionRule addressRequestDelayFIRule = addressRequestResponseDelayRuleBuilder.build();
+                FaultInjectionRule collectionRequestDelayFIRule = collectionRequestResponseDelayRuleBuilder.build();
+                FaultInjectionRule pkRangeRequestDelayFIRule = pkRangeRequestResponseDelayRuleBuilder.build();
 
-                CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainers.get(ThreadLocalRandom.current().nextInt(Configurations.COSMOS_CLIENT_COUNT)), Arrays.asList(partitionIsMigratingFIRule, goneFIRule)).block();
+                CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainers.get(ThreadLocalRandom.current().nextInt(Configurations.COSMOS_CLIENT_COUNT)), Arrays.asList(partitionIsMigratingFIRule, goneFIRule, addressRequestDelayFIRule, collectionRequestDelayFIRule, pkRangeRequestDelayFIRule)).block();
             } catch (Exception e) {
                 logger.warn("Could not configure fault injection rule for reads hitting partition is migrating and gone: {}", e.getMessage());
             }
