@@ -6,9 +6,11 @@ import com.azure.cosmos.CosmosAsyncContainer;
 import com.azure.cosmos.CosmosAsyncDatabase;
 import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.cosmos.CosmosContainerProactiveInitConfigBuilder;
+import com.azure.cosmos.CosmosDiagnosticsThresholds;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfig;
 import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfigBuilder;
 import com.azure.cosmos.CosmosException;
+import com.azure.cosmos.DirectConnectionConfig;
 import com.azure.cosmos.GatewayConnectionConfig;
 import com.azure.cosmos.implementation.apachecommons.lang.StringUtils;
 import com.azure.cosmos.implementation.guava25.base.Strings;
@@ -19,6 +21,20 @@ import com.azure.cosmos.models.CosmosItemResponse;
 import com.azure.cosmos.models.CosmosQueryRequestOptions;
 import com.azure.cosmos.models.PartitionKey;
 import com.azure.cosmos.models.SqlParameter;
+import com.azure.cosmos.models.FeedResponse;
+import com.azure.cosmos.util.CosmosPagedFlux;
+import com.azure.cosmos.models.FeedRange;
+import com.azure.cosmos.test.faultinjection.CosmosFaultInjectionHelper;
+import com.azure.cosmos.test.faultinjection.FaultInjectionCondition;
+import com.azure.cosmos.test.faultinjection.FaultInjectionConditionBuilder;
+import com.azure.cosmos.test.faultinjection.FaultInjectionConnectionType;
+import com.azure.cosmos.test.faultinjection.FaultInjectionEndpointBuilder;
+import com.azure.cosmos.test.faultinjection.FaultInjectionOperationType;
+import com.azure.cosmos.test.faultinjection.FaultInjectionResultBuilders;
+import com.azure.cosmos.test.faultinjection.FaultInjectionRule;
+import com.azure.cosmos.test.faultinjection.FaultInjectionRuleBuilder;
+import com.azure.cosmos.test.faultinjection.FaultInjectionServerErrorResult;
+import com.azure.cosmos.test.faultinjection.FaultInjectionServerErrorType;
 import com.azure.cosmos.models.SqlQuerySpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +45,7 @@ import reactor.core.scheduler.Schedulers;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -47,12 +64,16 @@ public class CosmosDRDrillTesting {
     private static List<CosmosAsyncContainer> cosmosAsyncContainers = new ArrayList<>();
 
     private static final CosmosEndToEndOperationLatencyPolicyConfig SIX_SECOND_E2E_TIMEOUT = new CosmosEndToEndOperationLatencyPolicyConfigBuilder(Duration.ofSeconds(6)).build();
+    private static final CosmosEndToEndOperationLatencyPolicyConfig THREE_SECOND_E2E_TIMEOUT = new CosmosEndToEndOperationLatencyPolicyConfigBuilder(Duration.ofSeconds(3)).build();
 
     private static final CosmosItemRequestOptions POINT_REQ_OPTS = new CosmosItemRequestOptions()
             .setCosmosEndToEndOperationLatencyPolicyConfig(SIX_SECOND_E2E_TIMEOUT);
 
     private static final CosmosQueryRequestOptions QUERY_REQ_OPTS = new CosmosQueryRequestOptions()
             .setCosmosEndToEndOperationLatencyPolicyConfig(SIX_SECOND_E2E_TIMEOUT);
+
+    private static final CosmosQueryRequestOptions QUERY_REQ_OPTS_WITH_3S_E2E_TIMEOUT = new CosmosQueryRequestOptions()
+            .setCosmosEndToEndOperationLatencyPolicyConfig(THREE_SECOND_E2E_TIMEOUT);
 
     private static final int PROCESSOR_COUNT = Runtime.getRuntime().availableProcessors();
 
@@ -73,9 +94,40 @@ public class CosmosDRDrillTesting {
             System.getProperty("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS")), "60")));
 
+    private static final Duration IDLE_CONNECTION_TIMEOUT = Duration.parse(System.getProperty("IDLE_CONNECTION_TIMEOUT",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IDLE_CONNECTION_TIMEOUT")), "PT0S")));
+
+    private static final Duration IDLE_ENDPOINT_TIMEOUT = Duration.parse(System.getProperty("IDLE_ENDPOINT_TIMEOUT",
+            StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IDLE_ENDPOINT_TIMEOUT")), "PT1H")));
+
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
+
+        //  Create diagnostics threshold
+        CosmosDiagnosticsThresholds cosmosDiagnosticsThresholds = new CosmosDiagnosticsThresholds();
+        //  These thresholds are for demo purposes
+        //  NOTE: Do not use the same thresholds for production
+        cosmosDiagnosticsThresholds.setPayloadSizeThreshold(100_00);
+        cosmosDiagnosticsThresholds.setPointOperationLatencyThreshold(Duration.ofMillis(50));
+        cosmosDiagnosticsThresholds.setNonPointOperationLatencyThreshold(Duration.ofMillis(50));
+        cosmosDiagnosticsThresholds.setRequestChargeThreshold(100f);
+
+        TELEMETRY_CONFIG.diagnosticsThresholds(cosmosDiagnosticsThresholds);
+
+        if (Configurations.ONLY_PPCB_NPE_REPRO_QUERY) {
+            logger.warn("ONLY_PPCB_NPE_REPRO_QUERY is true - only running repro query (case 4)");
+            System.setProperty(
+                    "COSMOS.PARTITION_LEVEL_CIRCUIT_BREAKER_CONFIG",
+                    "{\"isPartitionLevelCircuitBreakerEnabled\": true, "
+                            + "\"circuitBreakerType\": \"CONSECUTIVE_EXCEPTION_COUNT_BASED\","
+                            + "\"consecutiveExceptionCountToleratedForReads\": 10,"
+                            + "\"consecutiveExceptionCountToleratedForWrites\": 5,"
+                            + "}");
+
+            System.setProperty("COSMOS.STALE_PARTITION_UNAVAILABILITY_REFRESH_INTERVAL_IN_SECONDS", "60");
+            System.setProperty("COSMOS.ALLOWED_PARTITION_UNAVAILABILITY_DURATION_IN_SECONDS", "30");
+        }
 
         // Add shutdown hook for graceful cleanup
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -97,7 +149,11 @@ public class CosmosDRDrillTesting {
 
         if (Configurations.CONNECTION_MODE_AS_STRING.equals("DIRECT")) {
             logger.info("Creating client in direct mode");
-            cosmosClientBuilder = cosmosClientBuilder.directMode();
+            DirectConnectionConfig directConnectionConfig = DirectConnectionConfig.getDefaultConfig()
+                    .setIdleConnectionTimeout(IDLE_CONNECTION_TIMEOUT)
+                    .setIdleEndpointTimeout(IDLE_ENDPOINT_TIMEOUT);
+
+            cosmosClientBuilder = cosmosClientBuilder.directMode(directConnectionConfig);
 
             if (IS_PROACTIVE_CONNECTION_WARMUP_ENABLED) {
                 logger.info("Enabling proactive connection warmup with duration: {} seconds, database : {} and container : {}", AGGRESSIVE_CONNECTION_WARMUP_DURATION_SECONDS, Configurations.DATABASE_ID, Configurations.CONTAINER_ID);
@@ -201,12 +257,16 @@ public class CosmosDRDrillTesting {
         } else if (Configurations.ONLY_READALL) {
             availableOperations.add(3); // ReadAll
             logger.info("Workload configured to execute ONLY_READALL with PK values: {}", Configurations.READALL_PK_LIST);
+        } else if (Configurations.ONLY_PPCB_NPE_REPRO_QUERY) {
+            availableOperations.add(4);
+            logger.info("ONLY_PPAF_NPE_REPRO_QUERY is true - only running repro query (case 4)");
         } else {
             // Default behavior - all operations
             availableOperations.add(0); // Upsert
             availableOperations.add(1); // Read
             availableOperations.add(2); // Query
             availableOperations.add(3); // ReadAll
+            availableOperations.add(4); // Special repro query
             logger.info("Workload configured to execute all operation types (upserts, reads, queries, readAll)");
         }
         
@@ -214,7 +274,7 @@ public class CosmosDRDrillTesting {
             logger.error("No operations configured to execute. Exiting.");
             return;
         }
-        
+
         Mono.just(1)
                 .repeat(() -> !isShutdown.get())
                 .flatMap(integer -> {
@@ -241,6 +301,11 @@ public class CosmosDRDrillTesting {
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
                                     .then(readAllItems(cosmosAsyncContainers.get(containerId)))
                                     : readAllItems(cosmosAsyncContainers.get(containerId));
+                        case 4:
+                            return Configurations.QPS > 0
+                                    ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
+                                    .then(queryForPpcbNpeRepro(cosmosAsyncContainers.get(containerId)))
+                                    : queryForPpcbNpeRepro(cosmosAsyncContainers.get(containerId));
                         default:
                             return Mono.empty();
                     }
@@ -396,5 +461,84 @@ public class CosmosDRDrillTesting {
             }
             logger.info("Setup complete.");
         }
+    }
+
+    private static Mono<List<SimpleDoc>> queryForPpcbNpeRepro(CosmosAsyncContainer cosmosAsyncContainer) {
+
+        String sql = "SELECT * FROM C WHERE C.orderId >= 1 and C.orderId <= 10000";
+
+        int resultCount = 0;
+
+        SqlQuerySpec querySpec = new SqlQuerySpec(sql);
+
+        // configure a small page size via byPage(pageSize) when consuming
+        CosmosPagedFlux<SimpleDoc> pagedFlux = cosmosAsyncContainer.queryItems(querySpec, QUERY_REQ_OPTS_WITH_3S_E2E_TIMEOUT, SimpleDoc.class);
+
+        try {
+            FeedRange fullRange = FeedRange.forFullRange();
+
+            FaultInjectionServerErrorResult responseDelay = FaultInjectionResultBuilders
+                    .getResultBuilder(FaultInjectionServerErrorType.RESPONSE_DELAY)
+                    .delay(Duration.ofMillis(5000))
+                    // 30% hit rate
+                    .injectionRate(0.3)
+                    .suppressServiceRequests(false)
+                    .build();
+
+            FaultInjectionCondition condition = new FaultInjectionConditionBuilder()
+                    .connectionType(FaultInjectionConnectionType.DIRECT)
+                    .endpoints(new FaultInjectionEndpointBuilder(fullRange).build())
+                    .operationType(FaultInjectionOperationType.QUERY_ITEM)
+                    .region(Configurations.PREFERRED_REGIONS.get(0))
+                    .build();
+
+            String ruleId = String.format("ppaf-npe-repro-query-%s", UUID.randomUUID());
+
+            FaultInjectionRuleBuilder ruleBuilder = new FaultInjectionRuleBuilder(ruleId)
+                    .condition(condition)
+                    .result(responseDelay);
+
+            FaultInjectionRule faultInjectionRule = ruleBuilder.build();
+
+            CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainer, Arrays.asList(faultInjectionRule)).block();
+        } catch (Exception e) {
+            logger.warn("Could not configure fault injection rule for case 4: {}", e.getMessage());
+        }
+
+        String continuation = null;
+
+        do {
+            try {
+                Iterator<FeedResponse<SimpleDoc>> iterator = pagedFlux.byPage(continuation, 5).toIterable().iterator();
+                while (iterator.hasNext()) {
+                    FeedResponse<SimpleDoc> fr = iterator.next();
+                    resultCount += fr.getResults().size();
+                    continuation = fr.getContinuationToken();
+                }
+            } catch (CosmosException e) {
+                logger.error("CosmosException while executing case 4 query", e);
+                return Mono.empty();
+            }
+        } while (continuation != null && !isShutdown.get());
+
+        logger.info("Case 4 query completed with result count: {}", resultCount);
+        return Mono.empty();
+    }
+
+    // SimpleDoc used for repro queries
+    public static class SimpleDoc {
+        public String id;
+        public String pk;
+        public int orderId;
+
+        public SimpleDoc() {
+        }
+
+        public String getId() { return id; }
+        public String getPk() { return pk; }
+        public int getOrderId() { return orderId; }
+        public void setId(String id) { this.id = id; }
+        public void setPk(String pk) { this.pk = pk; }
+        public void setOrderId(int orderId) { this.orderId = orderId; }
     }
 }

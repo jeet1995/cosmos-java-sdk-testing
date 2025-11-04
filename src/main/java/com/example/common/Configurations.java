@@ -65,7 +65,11 @@ public class Configurations {
     public static final boolean ONLY_READALL = Boolean.parseBoolean(
             System.getProperty("ONLY_READALL",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("ONLY_READALL")), "false")));
-    
+
+    public static final boolean ONLY_PPCB_NPE_REPRO_QUERY = Boolean.parseBoolean(
+            System.getProperty("ONLY_PPCB_NPE_REPRO_QUERY",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("ONLY_PPCB_NPE_REPRO_QUERY")), "false")));
+
     // Predefined PK values for readAll workload (comma-separated integers)
     public static final String READALL_PK_VALUES = System.getProperty("READALL_PK_VALUES",
             StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("READALL_PK_VALUES")), generateDefaultPkList()));
