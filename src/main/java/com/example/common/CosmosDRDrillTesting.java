@@ -100,6 +100,10 @@ public class CosmosDRDrillTesting {
     private static final Duration IDLE_ENDPOINT_TIMEOUT = Duration.parse(System.getProperty("IDLE_ENDPOINT_TIMEOUT",
             StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("IDLE_ENDPOINT_TIMEOUT")), "PT1H")));
 
+    private static final boolean FORCE_CREATE_ON_UPSERT =  Boolean.parseBoolean(
+            System.getProperty("FORCE_CREATE_ON_UPSERT",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("FORCE_CREATE_ON_UPSERT")), "false")));
+
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
@@ -435,11 +439,23 @@ public class CosmosDRDrillTesting {
     }
 
     private static Pojo getItem(int id, int pk) {
-        Pojo pojo = new Pojo();
-        pojo.id = "pojo-id-" + id;
-        pojo.pk = "pojo-pk-" + pk;
-        pojo.field = "field-value-" + UUID.randomUUID();
-        return pojo;
+
+        if (FORCE_CREATE_ON_UPSERT) {
+            Pojo pojo = new Pojo();
+
+            String randomUuidString = UUID.randomUUID().toString();
+
+            pojo.id = "pojo-id-" + randomUuidString;
+            pojo.pk = "pojo-pk-" + randomUuidString;
+            pojo.field = "field-value-" + randomUuidString;
+            return pojo;
+        } else {
+            Pojo pojo = new Pojo();
+            pojo.id = "pojo-id-" + id;
+            pojo.pk = "pojo-pk-" + pk;
+            pojo.field = "field-value-" + UUID.randomUUID();
+            return pojo;
+        }
     }
 
     private static void setupDBAndContainer() {
