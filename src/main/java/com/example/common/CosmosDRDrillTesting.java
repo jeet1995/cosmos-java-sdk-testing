@@ -104,6 +104,10 @@ public class CosmosDRDrillTesting {
             System.getProperty("FORCE_CREATE_ON_UPSERT",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("FORCE_CREATE_ON_UPSERT")), "false")));
 
+    private static final int PARALLELIZATION_FACTOR = Integer.parseInt(
+            System.getProperty("PARALLELIZATION_FACTOR",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("PARALLELIZATION_FACTOR")), String.valueOf("1"))));
+
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
@@ -313,7 +317,7 @@ public class CosmosDRDrillTesting {
                         default:
                             return Mono.empty();
                     }
-                }, Configurations.QPS > 0 ? 1 : PROCESSOR_COUNT, Configurations.QPS > 0 ? 1 : PROCESSOR_COUNT)
+                }, Configurations.QPS > 0 ? 1 : PARALLELIZATION_FACTOR * PROCESSOR_COUNT, Configurations.QPS > 0 ? 1 : PARALLELIZATION_FACTOR * PROCESSOR_COUNT)
                 .onErrorResume(throwable -> {
                     logger.error("Error occurred in workload", throwable);
                     return Mono.empty();
