@@ -338,7 +338,12 @@ public class CosmosDRDrillTesting {
 
                     if (throwable instanceof CosmosException) {
                         CosmosException cosmosException = (CosmosException) throwable;
-                        logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+
+                        if (isUnhealthyStatusCode(cosmosException.getStatusCode())) {
+                            logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        } else {
+                            logger.debug("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        }
                     }
 
                     return Mono.empty();
@@ -353,11 +358,16 @@ public class CosmosDRDrillTesting {
         Pojo item = getItem(finalI, finalI);
         return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), POINT_REQ_OPTS, Pojo.class)
                 .onErrorResume(throwable -> {
-                    logger.error("Error occurred while reading item", throwable);
 
                     if (throwable instanceof CosmosException) {
+
                         CosmosException cosmosException = (CosmosException) throwable;
-                        logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+
+                        if (isUnhealthyStatusCode(cosmosException.getStatusCode())) {
+                            logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        } else {
+                            logger.debug("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        }
                     }
 
                     return Mono.empty();
@@ -377,11 +387,16 @@ public class CosmosDRDrillTesting {
         return cosmosAsyncContainer.queryItems(querySpec, QUERY_REQ_OPTS, Pojo.class)
                 .collectList()
                 .onErrorResume(throwable -> {
-                    logger.error("Error occurred while querying item", throwable);
 
                     if (throwable instanceof CosmosException) {
+
                         CosmosException cosmosException = (CosmosException) throwable;
-                        logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+
+                        if (isUnhealthyStatusCode(cosmosException.getStatusCode())) {
+                            logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        } else {
+                            logger.debug("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        }
                     }
 
                     return Mono.empty();
@@ -399,11 +414,16 @@ public class CosmosDRDrillTesting {
         return cosmosAsyncContainer.readAllItems(new PartitionKey(pkValue), Pojo.class)
                 .collectList()
                 .onErrorResume(throwable -> {
-                    logger.error("Error occurred while reading all items for pk: {}", pkValue, throwable);
 
                     if (throwable instanceof CosmosException) {
+
                         CosmosException cosmosException = (CosmosException) throwable;
-                        logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+
+                        if (isUnhealthyStatusCode(cosmosException.getStatusCode())) {
+                            logger.error("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        } else {
+                            logger.debug("CosmosException: {} - {}", cosmosException.getStatusCode(), cosmosException.getDiagnostics().getDiagnosticsContext());
+                        }
                     }
 
                     return Mono.empty();
@@ -543,6 +563,10 @@ public class CosmosDRDrillTesting {
 
         logger.info("Case 4 query completed with result count: {}", resultCount);
         return Mono.empty();
+    }
+
+    private static boolean isUnhealthyStatusCode(int statusCode) {
+        return statusCode == 503 || statusCode == 500 || statusCode == 410 || statusCode == 408;
     }
 
     // SimpleDoc used for repro queries
