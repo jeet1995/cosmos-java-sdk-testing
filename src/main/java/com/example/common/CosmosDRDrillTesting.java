@@ -36,6 +36,7 @@ import com.azure.cosmos.test.faultinjection.FaultInjectionRuleBuilder;
 import com.azure.cosmos.test.faultinjection.FaultInjectionServerErrorResult;
 import com.azure.cosmos.test.faultinjection.FaultInjectionServerErrorType;
 import com.azure.cosmos.models.SqlQuerySpec;
+import com.example.common.utils.Counter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.azure.identity.DefaultAzureCredentialBuilder;
@@ -49,6 +50,7 @@ import java.util.Iterator;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -107,6 +109,14 @@ public class CosmosDRDrillTesting {
     private static final int PARALLELIZATION_FACTOR = Integer.parseInt(
             System.getProperty("PARALLELIZATION_FACTOR",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("PARALLELIZATION_FACTOR")), String.valueOf("1"))));
+
+    private static final boolean SHOULD_INJECT_INTERNAL_SERVER_ERROR_GATEWAY = Boolean.parseBoolean(
+            System.getProperty("SHOULD_INJECT_INTERNAL_SERVER_ERROR_GATEWAY",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("SHOULD_INJECT_INTERNAL_SERVER_ERROR_GATEWAY")), "false")));
+
+    private static final boolean SHOULD_INJECT_INTERNAL_SERVER_ERROR_DIRECT = Boolean.parseBoolean(
+            System.getProperty("SHOULD_INJECT_INTERNAL_SERVER_ERROR_DIRECT",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("SHOULD_INJECT_INTERNAL_SERVER_ERROR_DIRECT")), "false")));
 
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
@@ -252,7 +262,28 @@ public class CosmosDRDrillTesting {
     private static void startWorkload() {
         // Determine which operations to execute based on configuration
         List<Integer> availableOperations = new ArrayList<>();
-        
+        ConcurrentHashMap<String, Counter> operationCounters = new ConcurrentHashMap<>();
+
+        operationCounters.put("upsert", new Counter());
+        operationCounters.put("read", new Counter());
+        operationCounters.put("query", new Counter());
+        operationCounters.put("readAll", new Counter());
+
+        for (CosmosAsyncContainer cosmosAsyncContainer : cosmosAsyncContainers) {
+
+            if (SHOULD_INJECT_INTERNAL_SERVER_ERROR_GATEWAY) {
+                injectFault(cosmosAsyncContainer, FaultInjectionConnectionType.GATEWAY, FaultInjectionOperationType.UPSERT_ITEM, FaultInjectionServerErrorType.INTERNAL_SERVER_ERROR);
+                injectFault(cosmosAsyncContainer, FaultInjectionConnectionType.GATEWAY, FaultInjectionOperationType.READ_ITEM, FaultInjectionServerErrorType.INTERNAL_SERVER_ERROR);
+                injectFault(cosmosAsyncContainer, FaultInjectionConnectionType.GATEWAY, FaultInjectionOperationType.QUERY_ITEM, FaultInjectionServerErrorType.INTERNAL_SERVER_ERROR);
+            }
+
+            if (SHOULD_INJECT_INTERNAL_SERVER_ERROR_DIRECT) {
+                injectFault(cosmosAsyncContainer, FaultInjectionConnectionType.DIRECT, FaultInjectionOperationType.UPSERT_ITEM, FaultInjectionServerErrorType.INTERNAL_SERVER_ERROR);
+                injectFault(cosmosAsyncContainer, FaultInjectionConnectionType.DIRECT, FaultInjectionOperationType.READ_ITEM, FaultInjectionServerErrorType.INTERNAL_SERVER_ERROR);
+                injectFault(cosmosAsyncContainer, FaultInjectionConnectionType.DIRECT, FaultInjectionOperationType.QUERY_ITEM, FaultInjectionServerErrorType.INTERNAL_SERVER_ERROR);
+            }
+        }
+
         if (Configurations.ONLY_UPSERTS) {
             availableOperations.add(0); // Upsert
             logger.info("Workload configured to execute ONLY_UPSERTS");
@@ -283,6 +314,7 @@ public class CosmosDRDrillTesting {
             return;
         }
 
+
         Mono.just(1)
                 .repeat(() -> !isShutdown.get())
                 .flatMap(integer -> {
@@ -292,23 +324,23 @@ public class CosmosDRDrillTesting {
                         case 0:
                             return Configurations.QPS > 0
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
-                                    .then(upsertItem(cosmosAsyncContainers.get(containerId)))
-                                    : upsertItem(cosmosAsyncContainers.get(containerId));
+                                    .then(upsertItem(cosmosAsyncContainers.get(containerId), operationCounters.get("upsert")))
+                                    : upsertItem(cosmosAsyncContainers.get(containerId), operationCounters.get("upsert"));
                         case 1:
                             return Configurations.QPS > 0
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
-                                    .then(readItem(cosmosAsyncContainers.get(containerId)))
-                                    : readItem(cosmosAsyncContainers.get(containerId));
+                                    .then(readItem(cosmosAsyncContainers.get(containerId), operationCounters.get("read")))
+                                    : readItem(cosmosAsyncContainers.get(containerId), operationCounters.get("read"));
                         case 2:
                             return Configurations.QPS > 0
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
-                                    .then(queryItem(cosmosAsyncContainers.get(containerId)))
-                                    : queryItem(cosmosAsyncContainers.get(containerId));
+                                    .then(queryItem(cosmosAsyncContainers.get(containerId), operationCounters.get("query")))
+                                    : queryItem(cosmosAsyncContainers.get(containerId), operationCounters.get("query"));
                         case 3:
                             return Configurations.QPS > 0
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
-                                    .then(readAllItems(cosmosAsyncContainers.get(containerId)))
-                                    : readAllItems(cosmosAsyncContainers.get(containerId));
+                                    .then(readAllItems(cosmosAsyncContainers.get(containerId), operationCounters.get("readAll")))
+                                    : readAllItems(cosmosAsyncContainers.get(containerId), operationCounters.get("readAll"));
                         case 4:
                             return Configurations.QPS > 0
                                     ? Mono.delay(Duration.ofMillis(1000 / Configurations.QPS))
@@ -322,19 +354,41 @@ public class CosmosDRDrillTesting {
                     logger.error("Error occurred in workload", throwable);
                     return Mono.empty();
                 })
+                .doFinally(signalType -> {
+
+                    logger.info("Workload terminated with signal: {}", signalType);
+                    for (String operation : operationCounters.keySet()) {
+                        Counter counter = operationCounters.get(operation);
+                        logger.info("Operation: {}, Total Operations: {}, Successes: {}, Failures: {}",
+                                operation,
+                                counter.getOperationCount(),
+                                counter.getSuccessesCount(),
+                                counter.getFailuresCount());
+                    }
+                })
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
     }
 
-    private static Mono<CosmosItemResponse<Pojo>> upsertItem(CosmosAsyncContainer cosmosAsyncContainer) {
+    private static Mono<CosmosItemResponse<Pojo>> upsertItem(
+            CosmosAsyncContainer cosmosAsyncContainer,
+            Counter counter) {
+
         int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
 
         Pojo item = getItem(finalI, finalI);
 
         logger.debug("upsert item: {}", finalI);
         return cosmosAsyncContainer.upsertItem(item, new PartitionKey(item.getPk()), POINT_REQ_OPTS)
+                .doOnSubscribe(subscription -> {
+                    counter.incrementOperationCount();
+                })
+                .doOnSuccess(response -> {
+                    counter.incrementSuccessesCount();
+                })
                 .onErrorResume(throwable -> {
                     logger.error("Error occurred while upserting item", throwable);
+                    counter.incrementFailuresCount();
 
                     if (throwable instanceof CosmosException) {
                         CosmosException cosmosException = (CosmosException) throwable;
@@ -351,14 +405,23 @@ public class CosmosDRDrillTesting {
 
     }
 
-    private static Mono<CosmosItemResponse<Pojo>> readItem(CosmosAsyncContainer cosmosAsyncContainer) {
+    private static Mono<CosmosItemResponse<Pojo>> readItem(
+            CosmosAsyncContainer cosmosAsyncContainer,
+            Counter counter) {
 
         int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
         logger.debug("read item: {}", finalI);
         Pojo item = getItem(finalI, finalI);
         return cosmosAsyncContainer.readItem(item.getId(), new PartitionKey(item.getPk()), POINT_REQ_OPTS, Pojo.class)
+                .doOnSubscribe(subscription -> {
+                    counter.incrementOperationCount();
+                })
+                .doOnSuccess(response -> {
+                    counter.incrementSuccessesCount();
+                })
                 .onErrorResume(throwable -> {
 
+                    counter.incrementFailuresCount();
                     if (throwable instanceof CosmosException) {
 
                         CosmosException cosmosException = (CosmosException) throwable;
@@ -375,7 +438,9 @@ public class CosmosDRDrillTesting {
 
     }
 
-    private static Mono<List<Pojo>> queryItem(CosmosAsyncContainer cosmosAsyncContainer) {
+    private static Mono<List<Pojo>> queryItem(
+            CosmosAsyncContainer cosmosAsyncContainer,
+            Counter counter) {
 
         int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
         logger.debug("query item: {}", finalI);
@@ -386,8 +451,15 @@ public class CosmosDRDrillTesting {
                 item.getPk())));
         return cosmosAsyncContainer.queryItems(querySpec, QUERY_REQ_OPTS, Pojo.class)
                 .collectList()
+                .doOnSubscribe(subscription -> {
+                    counter.incrementOperationCount();
+                })
+                .doOnSuccess(response -> {
+                    counter.incrementSuccessesCount();
+                })
                 .onErrorResume(throwable -> {
 
+                    counter.incrementFailuresCount();
                     if (throwable instanceof CosmosException) {
 
                         CosmosException cosmosException = (CosmosException) throwable;
@@ -404,7 +476,10 @@ public class CosmosDRDrillTesting {
 
     }
 
-    private static Mono<List<Pojo>> readAllItems(CosmosAsyncContainer cosmosAsyncContainer) {
+    private static Mono<List<Pojo>> readAllItems(
+            CosmosAsyncContainer cosmosAsyncContainer,
+            Counter counter) {
+
         // Select a random PK from the predefined list
         int finalI = ThreadLocalRandom.current().nextInt(Configurations.TOTAL_NUMBER_OF_DOCUMENTS);
         String pkValue = "pojo-pk-" + (finalI + 1);
@@ -413,8 +488,15 @@ public class CosmosDRDrillTesting {
 
         return cosmosAsyncContainer.readAllItems(new PartitionKey(pkValue), Pojo.class)
                 .collectList()
+                .doOnSubscribe(subscription -> {
+                    counter.incrementOperationCount();
+                })
+                .doOnSuccess(response -> {
+                    counter.incrementSuccessesCount();
+                })
                 .onErrorResume(throwable -> {
 
+                    counter.incrementFailuresCount();
                     if (throwable instanceof CosmosException) {
 
                         CosmosException cosmosException = (CosmosException) throwable;
@@ -563,6 +645,33 @@ public class CosmosDRDrillTesting {
 
         logger.info("Case 4 query completed with result count: {}", resultCount);
         return Mono.empty();
+    }
+
+    private static void injectFault(
+            CosmosAsyncContainer cosmosAsyncContainer,
+            FaultInjectionConnectionType faultInjectionConnectionType,
+            FaultInjectionOperationType faultInjectionOperationType,
+            FaultInjectionServerErrorType serverErrorType) {
+
+        String ruleId = "serverErrorRule-" + serverErrorType + "-" + UUID.randomUUID();
+        FaultInjectionRule serverErrorRule =
+                new FaultInjectionRuleBuilder(ruleId)
+                        .condition(
+                                new FaultInjectionConditionBuilder()
+                                        .connectionType(faultInjectionConnectionType)
+                                        .operationType(faultInjectionOperationType)
+                                        .build()
+                        )
+                        .result(
+                                FaultInjectionResultBuilders
+                                        .getResultBuilder(serverErrorType)
+                                        .build()
+                        )
+                        .startDelay(Duration.ofMinutes(2))
+                        .duration(Duration.ofMinutes(5))
+                        .build();
+
+        CosmosFaultInjectionHelper.configureFaultInjectionRules(cosmosAsyncContainer, Arrays.asList(serverErrorRule)).block();
     }
 
     private static boolean isUnhealthyStatusCode(int statusCode) {
