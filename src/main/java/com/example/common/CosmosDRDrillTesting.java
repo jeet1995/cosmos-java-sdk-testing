@@ -225,14 +225,26 @@ public class CosmosDRDrillTesting {
         //  Insert initial data for the workload
         insertData(cosmosAsyncContainers.get(0));
 
+        ConcurrentHashMap<String, Counter> operationCounters = new ConcurrentHashMap<>();
+
         //  Start the workload
-        startWorkload();
+        startWorkload(operationCounters);
 
         // Wait for the specified duration or indefinitely if no duration is set
         if (Configurations.WORKLOAD_DURATION_PARSED != null) {
             logger.info("Workload will run for: {}", Configurations.WORKLOAD_DURATION_PARSED);
             try {
                 Thread.sleep(Configurations.WORKLOAD_DURATION_PARSED.toMillis());
+
+                for (String operation : operationCounters.keySet()) {
+                    Counter counter = operationCounters.get(operation);
+                    logger.info("Operation: {}, Total Operations: {}, Successes: {}, Failures: {}",
+                            operation,
+                            counter.getOperationCount(),
+                            counter.getSuccessesCount(),
+                            counter.getFailuresCount());
+                }
+
                 logger.info("Workload duration completed. Shutting down...");
             } catch (InterruptedException e) {
                 logger.warn("Main thread interrupted: {}", e.getMessage(), e);
@@ -259,10 +271,9 @@ public class CosmosDRDrillTesting {
         }
     }
 
-    private static void startWorkload() {
+    private static void startWorkload(ConcurrentHashMap<String, Counter> operationCounters) {
         // Determine which operations to execute based on configuration
         List<Integer> availableOperations = new ArrayList<>();
-        ConcurrentHashMap<String, Counter> operationCounters = new ConcurrentHashMap<>();
 
         operationCounters.put("upsert", new Counter());
         operationCounters.put("read", new Counter());
