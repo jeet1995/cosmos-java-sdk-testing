@@ -108,6 +108,10 @@ public class CosmosDRDrillTesting {
             System.getProperty("PARALLELIZATION_FACTOR",
                     StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("PARALLELIZATION_FACTOR")), String.valueOf("1"))));
 
+    private static final boolean THIN_CLIENT_MODE_ENABLED = Boolean.parseBoolean(
+            System.getProperty("THIN_CLIENT_MODE_ENABLED",
+                    StringUtils.defaultString(Strings.emptyToNull(System.getenv().get("THIN_CLIENT_MODE_ENABLED")), "false")));
+
     private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     public static void main(String[] args) {
@@ -178,6 +182,12 @@ public class CosmosDRDrillTesting {
             logger.info("Creating client in gateway mode");
             GatewayConnectionConfig gatewayConnectionConfig = GatewayConnectionConfig.getDefaultConfig();
             cosmosClientBuilder = cosmosClientBuilder.gatewayMode(gatewayConnectionConfig);
+
+            if (THIN_CLIENT_MODE_ENABLED) {
+                logger.info("Enabling Thin Client Mode");
+                System.setProperty("COSMOS.THINCLIENT_ENABLED", "true");
+            }
+
         } else {
             logger.error("Invalid connection mode: {}", Configurations.CONNECTION_MODE_AS_STRING);
             return;
