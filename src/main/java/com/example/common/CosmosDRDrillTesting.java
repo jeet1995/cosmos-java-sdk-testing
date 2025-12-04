@@ -12,6 +12,7 @@ import com.azure.cosmos.CosmosEndToEndOperationLatencyPolicyConfigBuilder;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.DirectConnectionConfig;
 import com.azure.cosmos.GatewayConnectionConfig;
+import com.azure.cosmos.Http2ConnectionConfig;
 import com.azure.cosmos.implementation.apachecommons.lang.StringUtils;
 import com.azure.cosmos.implementation.guava25.base.Strings;
 import com.azure.cosmos.models.CosmosClientTelemetryConfig;
@@ -186,8 +187,10 @@ public class CosmosDRDrillTesting {
             if (THIN_CLIENT_MODE_ENABLED) {
                 logger.info("Enabling Thin Client Mode");
                 System.setProperty("COSMOS.THINCLIENT_ENABLED", "true");
-            }
 
+                gatewayConnectionConfig.setHttp2ConnectionConfig(new Http2ConnectionConfig().setEnabled(true));
+                cosmosClientBuilder = cosmosClientBuilder.gatewayMode(gatewayConnectionConfig);
+            }
         } else {
             logger.error("Invalid connection mode: {}", Configurations.CONNECTION_MODE_AS_STRING);
             return;
