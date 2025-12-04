@@ -269,31 +269,30 @@ public class CosmosDRDrillTesting {
         if (Configurations.ONLY_UPSERTS) {
             availableOperations.add(0); // Upsert
             logger.info("Workload configured to execute ONLY_UPSERTS");
-        } else if (Configurations.ONLY_READS) {
+        }
+
+        if (Configurations.ONLY_READS) {
             availableOperations.add(1); // Read
             logger.info("Workload configured to execute ONLY_READS");
-        } else if (Configurations.ONLY_QUERIES) {
+        }
+
+        if (Configurations.ONLY_QUERIES) {
             availableOperations.add(2); // Query
             logger.info("Workload configured to execute ONLY_QUERIES");
-        } else if (Configurations.ONLY_READALL) {
+        }
+
+        if (Configurations.ONLY_READALL) {
             availableOperations.add(3); // ReadAll
             logger.info("Workload configured to execute ONLY_READALL with PK values: {}", Configurations.READALL_PK_LIST);
-        } else if (Configurations.ONLY_PPCB_NPE_REPRO_QUERY) {
-            availableOperations.add(4);
-            logger.info("ONLY_PPAF_NPE_REPRO_QUERY is true - only running repro query (case 4)");
-        } else {
+        }
+
+        if (!Configurations.ONLY_UPSERTS && !Configurations.ONLY_READS && !Configurations.ONLY_QUERIES && !Configurations.ONLY_READALL) {
             // Default behavior - all operations
             availableOperations.add(0); // Upsert
             availableOperations.add(1); // Read
             availableOperations.add(2); // Query
             availableOperations.add(3); // ReadAll
-            availableOperations.add(4); // Special repro query
             logger.info("Workload configured to execute all operation types (upserts, reads, queries, readAll)");
-        }
-        
-        if (availableOperations.isEmpty()) {
-            logger.error("No operations configured to execute. Exiting.");
-            return;
         }
 
         Mono.just(1)
